@@ -1,0 +1,119 @@
+# ==========================================
+# Python
+# ==========================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+*.so
+
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# ==========================================
+# Environment variables and secrets
+# ==========================================
+
+.env
+.env.*
+!.env.example
+
+# API keys and secret files
+secrets/
+*.key
+*.pem
+
+# ==========================================
+# Jupyter Notebook
+# ==========================================
+
+.ipynb_checkpoints/
+
+# ==========================================
+# Testing
+# ==========================================
+
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==========================================
+# Type checking / linting caches
+# ==========================================
+
+.mypy_cache/
+.ruff_cache/
+
+# ==========================================
+# IDE / Editor
+# ==========================================
+
+.vscode/
+.idea/
+
+*.swp
+*.swo
+
+# ==========================================
+# Operating System files
+# ==========================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# Project data
+# ==========================================
+
+# Large/raw datasets should not be pushed
+data/raw/
+data/processed/
+
+# Keep folder structure if needed
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# ==========================================
+# Model files / downloaded models
+# ==========================================
+
+models/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# ==========================================
+# Hugging Face cache
+# ==========================================
+
+.cache/
+huggingface/
+
+# ==========================================
+# Generated results
+# ==========================================
+
+results/
+outputs/
+
+# ==========================================
+# Logs
+# ==========================================
+
+logs/
+*.log
+
+# ==========================================
+# Temporary files
+# ==========================================
+
+tmp/
+temp/
+*.tmp

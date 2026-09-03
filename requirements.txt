@@ -1,0 +1,34 @@
+# Core data processing
+numpy>=1.24
+pandas>=2.0
+
+# Machine Learning
+scikit-learn>=1.3
+
+# Encryption for the Session Vault
+cryptography>=42.0
+
+# Embeddings / semantic processing for DP-noise mechanisms
+sentence-transformers>=2.2
+
+# Hugging Face datasets
+datasets>=2.18
+
+# Synthetic data generation
+faker>=24.0
+
+# Entity detection
+gliner
+
+# Environment variables / API keys
+python-dotenv>=1.0
+
+# HTTP requests for LLM APIs
+requests>=2.31
+httpx>=0.27
+
+# Testing
+pytest>=8.0
+
+# Optional: useful for evaluation and visualization
+matplotlib>=3.8

@@ -21,6 +21,29 @@ from dataclasses import dataclass
 from typing import Iterable, Protocol
 
 
+LABEL_NORMALIZATION = {
+    "ORGANIZATION": "ORG",
+    "COMPANY": "ORG",
+    "GPE": "LOCATION",
+    "CITY": "LOCATION",
+    "COUNTRY": "LOCATION",
+    "PERSON_NAME": "PERSON",
+}
+
+def normalize_entity_type(entity_type: str) -> str:
+    """
+    Normalize entity labels from different detectors into the
+    common entity schema used by Beyond Redaction.
+    """
+
+    normalized = entity_type.upper().strip().replace(" ", "_")
+
+    return LABEL_NORMALIZATION.get(
+        normalized,
+        normalized
+    )
+
+
 @dataclass
 class DetectedEntity:
     text: str
@@ -39,10 +62,67 @@ class EntityDetector(Protocol):
 # ---------------------------------------------------------------------------
 
 _DEV_PATTERNS = {
-    "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    "EMAIL": re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),
-    "PROJECT_CODE": re.compile(r"\bProject\s+[A-Z][a-z]+\b"),
-    "DATE": re.compile(r"\b[A-Z][a-z]+ \d{1,2},? \d{4}\b"),
+    # US Social Security Number
+    "SSN": re.compile(
+        r"\b\d{3}-\d{2}-\d{4}\b"
+    ),
+
+    # Email address
+    "EMAIL": re.compile(
+        r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"
+    ),
+
+    # Phone number
+    "PHONE": re.compile(
+        r"\b(?:\+\d{1,3}[-.\s]?)?"
+        r"(?:\(?\d{2,4}\)?[-.\s]?)?"
+        r"\d{3,4}[-.\s]?\d{3,4}\b"
+    ),
+
+    # Employee ID examples:
+    # EMP-1234
+    # EMP12345
+    "EMPLOYEE_ID": re.compile(
+        r"\bEMP[-_]?\d{4,8}\b",
+        re.IGNORECASE
+    ),
+
+    # Invoice / Purchase / Sales identifiers
+    # INV-2026-00452
+    # PO-123456
+    "INVOICE_NO": re.compile(
+        r"\b(?:INV|PO|SO)-\d{2,10}(?:-\d{2,10})*\b",
+        re.IGNORECASE
+    ),
+
+    # Project references:
+    # Project Falcon
+    # PROJ-782
+    "PROJECT_CODE": re.compile(
+        r"\b(?:Project\s+[A-Za-z][A-Za-z0-9_-]*|PROJ-\d+)\b",
+        re.IGNORECASE
+    ),
+
+    # API keys (generic/simple initial pattern)
+    "API_KEY": re.compile(
+        r"\b(?:sk|api)[_-][A-Za-z0-9_-]{16,}\b",
+        re.IGNORECASE
+    ),
+
+    # IPv4 addresses
+    "IP_ADDRESS": re.compile(
+        r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+    ),
+
+    # Dates such as:
+    # March 15, 2026
+    # March 15 2026
+    "DATE": re.compile(
+        r"\b(?:January|February|March|April|May|June|July|August|"
+        r"September|October|November|December)\s+"
+        r"\d{1,2},?\s+\d{4}\b",
+        re.IGNORECASE
+    ),
 }
 
 
@@ -77,13 +157,38 @@ class GLiNERDetector:
         from gliner import GLiNER  # local import: heavy optional dependency
         self.model = GLiNER.from_pretrained(model_name)
 
-    def detect(self, text: str) -> list[DetectedEntity]:
+    def detect(
+    self,
+    text: str,
+    already_found: set[tuple[int, int]] | None = None,
+    ) -> list[DetectedEntity]:
+
+        already_found = already_found or set()
+
         raw = self.model.predict_entities(text, self.LABELS)
-        return [
-            DetectedEntity(r["text"], r["label"].upper().replace(" ", "_"),
-                            r["start"], r["end"], source="gliner")
-            for r in raw
-        ]
+
+        entities = []
+
+        for r in raw:
+
+            start = r["start"]
+            end = r["end"]
+
+            # Skip entities whose span was already detected
+            if (start, end) in already_found:
+                continue
+
+            entities.append(
+                DetectedEntity(
+                    r["text"],
+                    normalize_entity_type(r["label"]),
+                    start,
+                    end,
+                    source="gliner",
+                )
+            )
+
+        return entities
 
 
 class LocalLLMDetector:

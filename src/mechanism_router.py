@@ -44,7 +44,30 @@ from typing import Callable, Optional
 
 import numpy as np
 
+EXACT_RECOVERY_KEYWORDS = {
+    "exact",
+    "original",
+    "verbatim",
+    "byte-for-byte",
+    "unchanged",
+    "precise",
+    "specific",
+    "correct identifier",
+    "exact value",
+}
 
+APPROXIMATE_CONTEXT_KEYWORDS = {
+    "summarize",
+    "summary",
+    "overview",
+    "general",
+    "analyze",
+    "analysis",
+    "describe",
+    "insight",
+    "trend",
+    "aggregate",
+}
 # ---------------------------------------------------------------------------
 # Decision types
 # ---------------------------------------------------------------------------
@@ -118,6 +141,8 @@ def is_structured_identifier(entity_text: str, entity_type: str) -> bool:
 
 RetainJudge = Callable[[str, str, str], UtilityDecision]
 
+ExactRecoveryJudge = Callable[[str, str, str], bool]
+
 
 def default_retain_judge(entity_text: str, entity_type: str, context: str) -> UtilityDecision:
     """Conservative default: anything the detector flagged gets PROTECT
@@ -128,6 +153,57 @@ def default_retain_judge(entity_text: str, entity_type: str, context: str) -> Ut
     if entity_type in _NON_SENSITIVE_TYPES:
         return UtilityDecision.RETAIN
     return UtilityDecision.PROTECT
+
+
+def default_exact_recovery_judge(
+    entity_text: str,
+    entity_type: str,
+    context: str
+) -> bool:
+    """
+    Decide whether the original entity value must be recoverable exactly
+    after downstream LLM processing.
+
+    The decision considers both:
+    1. Explicit downstream requirements in the context.
+    2. The inherent structure of the entity.
+    """
+
+    entity_type = entity_type.upper()
+    context_lower = context.lower()
+
+    # --------------------------------------------------
+    # 1. Explicit downstream request for exact recovery
+    # --------------------------------------------------
+
+    if any(
+        keyword in context_lower
+        for keyword in EXACT_RECOVERY_KEYWORDS
+    ):
+        return True
+
+    # --------------------------------------------------
+    # 2. Explicit downstream use where approximation is sufficient
+    # --------------------------------------------------
+
+    if any(
+        keyword in context_lower
+        for keyword in APPROXIMATE_CONTEXT_KEYWORDS
+    ):
+        return False
+
+    # --------------------------------------------------
+    # 3. Structured identifiers normally need exact recovery
+    # --------------------------------------------------
+
+    if is_structured_identifier(entity_text, entity_type):
+        return True
+
+    # --------------------------------------------------
+    # 4. Default: approximate representation is sufficient
+    # --------------------------------------------------
+
+    return False
 
 
 def make_llm_retain_judge(llm_call: Callable[[str], str]) -> RetainJudge:
@@ -194,9 +270,11 @@ class MechanismRouter:
     def __init__(
         self,
         retain_judge: RetainJudge = default_retain_judge,
+        exact_recovery_judge: ExactRecoveryJudge = default_exact_recovery_judge,
         severity_model: Optional[TrainableSeverityModel] = None,
     ):
         self.retain_judge = retain_judge
+        self.exact_recovery_judge = exact_recovery_judge
         self.severity_model = severity_model or TrainableSeverityModel()
 
     def route(self, entity_text: str, entity_type: str, context: str = "") -> RoutingDecision:
@@ -209,15 +287,29 @@ class MechanismRouter:
                 reason="Task-relevant; retained in context.",
             )
 
-        structured = is_structured_identifier(entity_text, entity_type)
-        mechanism = Mechanism.TOKENIZE if structured else Mechanism.DP_NOISE
+        requires_exact_recovery = self.exact_recovery_judge(
+            entity_text,
+            entity_type,
+            context
+        )
+
+        mechanism = (
+            Mechanism.TOKENIZE
+            if requires_exact_recovery
+            else Mechanism.DP_NOISE
+        )
+
         severity = self.severity_model.score(entity_text, entity_type)
 
         reason = (
-            "Structured identifier -> exact reversible recovery required."
-            if structured else
-            "Free-text quasi-identifier -> semantic neighbors exist, approximate is sufficient."
+            "Exact recovery required for downstream use; "
+            "routed to reversible tokenization."
+            if requires_exact_recovery
+            else
+            "Exact recovery is not required; approximate semantic context "
+            "is sufficient, so DP-noise is used."
         )
+
         return RoutingDecision(
             entity_text=entity_text, entity_type=entity_type,
             utility=utility, mechanism=mechanism, severity=severity, reason=reason,

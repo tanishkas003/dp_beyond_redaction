@@ -71,13 +71,41 @@ class SessionVault:
     _fernet: Fernet = field(default_factory=lambda: Fernet(Fernet.generate_key()))
     _encrypted_store: dict[str, bytes] = field(default_factory=dict)
     _used_surrogates: dict[str, set] = field(default_factory=dict)  # per entity_text
+    _token_counters: dict[str, int] = field(default_factory=dict)
 
-    def _choose_surrogate(self, entity_text: str, entity_type: str) -> str:
+    def _choose_surrogate(
+        self,
+        entity_text: str,
+        entity_type: str,
+    ) -> str:
+
         pool = _pool_for(entity_type)
+
+        # If this entity type does not have a meaningful
+        # surrogate pool, generate a unique placeholder.
+        if pool == _SURROGATE_POOLS["DEFAULT"]:
+
+            entity_type = entity_type.upper()
+
+            count = self._token_counters.get(entity_type, 0) + 1
+
+            self._token_counters[entity_type] = count
+
+            return f"[{entity_type}_{count}]"
+
+        # Use one-to-many semantic surrogate pools
         used = self._used_surrogates.setdefault(entity_text, set())
-        available = [s for s in pool if s not in used] or pool
+
+        available = [
+        surrogate
+        for surrogate in pool
+        if surrogate not in used
+        ] or pool
+
         choice = random.choice(available)
+
         used.add(choice)
+
         return choice
 
     def protect(self, entity_text: str, entity_type: str, mechanism: str) -> str:
@@ -91,6 +119,32 @@ class SessionVault:
         self._store(surrogate, entry)
         return surrogate
 
+
+    def store_mapping(
+    self,
+    surrogate: str,
+    original: str,
+    entity_type: str,
+    mechanism: str,
+    ) -> None:
+        """
+        Store a pre-generated protected value and its original value.
+
+        The transformation itself is performed by the appropriate
+        mechanism module; the vault only stores the encrypted reversible
+        mapping.
+        """
+
+        entry = VaultEntry(
+        surrogate=surrogate,
+        original=original,
+        entity_type=entity_type,
+        mechanism=mechanism,
+        )
+
+        self._store(surrogate, entry)
+
+
     def restore(self, surrogate: str) -> Optional[str]:
         """Look up and decrypt the original value for a surrogate seen
         in the LLM's response. Returns None if not found (e.g. the
@@ -100,13 +154,29 @@ class SessionVault:
         return entry.original if entry else None
 
     def restore_all(self, response_text: str) -> str:
-        """Convenience: replace every known surrogate in a response
-        with its original value."""
+        """
+        Replace every known surrogate or placeholder in a response
+        with its original value.
+
+        The encrypted store is the source of truth because it contains
+        both semantic surrogates and generated structured placeholders.
+        """
+
         restored = response_text
-        for surrogate in list(self._used_surrogates_flat()):
+
+        # Sort longest first to avoid partial replacement problems.
+        surrogates = sorted(
+            self._encrypted_store.keys(),
+            key=len,
+            reverse=True,
+        )
+
+        for surrogate in surrogates:
             original = self.restore(surrogate)
-            if original:
+
+            if original is not None:
                 restored = restored.replace(surrogate, original)
+
         return restored
 
     def destroy(self) -> None:
@@ -115,6 +185,7 @@ class SessionVault:
         ephemeral rather than a durable dictionary."""
         self._encrypted_store.clear()
         self._used_surrogates.clear()
+        self._token_counters.clear()
         self._fernet = Fernet(Fernet.generate_key())  # orphan the old key
 
     # -- internal encrypted storage -----------------------------------

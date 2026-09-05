@@ -157,3 +157,32 @@ def test_store_pre_generated_mapping():
     restored = vault.restore("[PERSON_1]")
 
     assert restored == "Priya Sharma"
+
+
+def test_vault_encrypts_mappings_at_rest():
+
+    vault = SessionVault()
+
+    surrogate = vault.protect(
+        "Priya Sharma",
+        "PERSON",
+        mechanism="TOKENIZE",
+    )
+
+    encrypted_blob = vault._encrypted_store[surrogate]
+
+    assert isinstance(encrypted_blob, bytes)
+    assert b"Priya Sharma" not in encrypted_blob
+
+
+def test_vault_normalizes_entity_types():
+
+    vault = SessionVault()
+
+    surrogate = vault.protect(
+        "Bangalore",
+        "location",
+        mechanism="dp_noise",
+    )
+
+    assert vault.restore(surrogate) == "Bangalore"

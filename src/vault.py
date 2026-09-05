@@ -47,7 +47,7 @@ _SURROGATE_POOLS: dict[str, list[str]] = {
 
 
 def _pool_for(entity_type: str) -> list[str]:
-    return _SURROGATE_POOLS.get(entity_type, _SURROGATE_POOLS["DEFAULT"])
+    return _SURROGATE_POOLS.get(entity_type.upper(), _SURROGATE_POOLS["DEFAULT"])
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +79,7 @@ class SessionVault:
         entity_type: str,
     ) -> str:
 
+        entity_type = entity_type.upper()
         pool = _pool_for(entity_type)
 
         # If this entity type does not have a meaningful
@@ -113,6 +114,8 @@ class SessionVault:
         that goes into the sanitized prompt. Works for both TOKENIZE and
         DP_NOISE mechanisms -- both get logged so restoration can cover
         every protected span, per Objective 2."""
+        entity_type = entity_type.upper()
+        mechanism = mechanism.upper()
         surrogate = self._choose_surrogate(entity_text, entity_type)
         entry = VaultEntry(surrogate=surrogate, original=entity_text,
                             entity_type=entity_type, mechanism=mechanism)
@@ -134,6 +137,8 @@ class SessionVault:
         mechanism module; the vault only stores the encrypted reversible
         mapping.
         """
+        entity_type = entity_type.upper()
+        mechanism = mechanism.upper()
 
         entry = VaultEntry(
         surrogate=surrogate,

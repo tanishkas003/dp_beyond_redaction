@@ -36,7 +36,7 @@ _GENERALIZATION_MAP = {
 
 
 def generalize(entity_text: str, entity_type: str) -> str:
-    fn = _GENERALIZATION_MAP.get(entity_type)
+    fn = _GENERALIZATION_MAP.get(entity_type.upper())
     return fn(entity_text) if fn else "a related detail"
 
 

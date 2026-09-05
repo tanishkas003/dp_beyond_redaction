@@ -61,3 +61,13 @@ def test_sanitize_entity_uses_fallback_when_no_mechanism():
     )
 
     assert result == "a regional office"
+
+
+def test_generalize_is_case_insensitive():
+
+    result = generalize(
+        "Bangalore",
+        "location",
+    )
+
+    assert result == "a regional office"

@@ -31,6 +31,7 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import Sequence
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +44,10 @@ def router_vs_tab_agreement(router, tab_records: list[dict]) -> dict:
     human DIRECT/QUASI labels. Report this as evidence the routing rule
     isn't arbitrary -- it's cross-validated against expert human
     anonymization judgment, which none of the reviewed prior systems do."""
-    from mechanism_router import Mechanism, is_structured_identifier
+    try:
+        from .mechanism_router import is_structured_identifier
+    except ImportError:  # pragma: no cover - standalone invocation from src/
+        from mechanism_router import is_structured_identifier
 
     correct = 0
     for rec in tab_records:
@@ -67,6 +71,25 @@ def leakage_prevention_rate(ground_truth_spans: list[str], sanitized_text: str) 
         return 1.0
     prevented = sum(1 for span in ground_truth_spans if span not in sanitized_text)
     return prevented / len(ground_truth_spans)
+
+
+def reversibility_accuracy(expected_values: Sequence[str], restored_text: str) -> float:
+    """Fraction of values that survive a protect -> LLM -> restore round trip.
+
+    Pass only values that were routed through a reversible mechanism.  A value
+    counts as restored when it occurs verbatim in the final restored response;
+    this correctly records a miss when an LLM paraphrases or drops a token.
+    """
+    if not expected_values:
+        return 1.0
+    return sum(value in restored_text for value in expected_values) / len(expected_values)
+
+
+def utility_retention(original_utility: float, protected_utility: float) -> float:
+    """Utility kept relative to the unprotected reference (1.0 is unchanged)."""
+    if original_utility <= 0:
+        return 1.0 if protected_utility <= 0 else 0.0
+    return max(0.0, protected_utility / original_utility)
 
 
 AttackerFn = "Callable[[str, str], str]"  # (sanitized_text, question) -> guessed answer
@@ -140,11 +163,15 @@ def reversibility_weighted_relative_gain(
 class LatencyBreakdown:
     stages: dict = field(default_factory=dict)
 
+    REQUIRED_STAGES = ("detection", "routing", "protection", "vault_operations", "llm_generation", "restoration")
+
     @contextmanager
     def measure(self, stage_name: str):
         start = time.perf_counter()
-        yield
-        self.stages[stage_name] = self.stages.get(stage_name, 0.0) + (time.perf_counter() - start)
+        try:
+            yield
+        finally:
+            self.stages[stage_name] = self.stages.get(stage_name, 0.0) + (time.perf_counter() - start)
 
     def total(self) -> float:
         return sum(self.stages.values())
@@ -152,6 +179,21 @@ class LatencyBreakdown:
     def report(self) -> dict:
         total = self.total() or 1e-9
         return {name: {"seconds": t, "pct_of_total": t / total} for name, t in self.stages.items()}
+
+    def complete_report(self) -> dict:
+        """Report all standard stages, using zero for stages not instrumented."""
+        total = self.total() or 1e-9
+        names = dict.fromkeys((*self.REQUIRED_STAGES, *self.stages))
+        return {name: {"seconds": self.stages.get(name, 0.0),
+                       "pct_of_total": self.stages.get(name, 0.0) / total}
+                for name in names}
+
+
+# Explicit aliases make notebook/report code read naturally.
+calculate_leakage_prevention_rate = leakage_prevention_rate
+calculate_reidentification_success_rate = reidentification_success_rate
+calculate_reversibility_accuracy = reversibility_accuracy
+calculate_utility_retention = utility_retention
 
 
 if __name__ == "__main__":

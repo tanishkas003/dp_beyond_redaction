@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+from src.exponential_mechanism import ExponentialMechanism, ExponentialMechanismConfig
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,31 @@ _GENERALIZATION_MAP = {
 def generalize(entity_text: str, entity_type: str) -> str:
     fn = _GENERALIZATION_MAP.get(entity_type)
     return fn(entity_text) if fn else "a related detail"
+
+_CANDIDATES = {
+    "LOCATION": ["a regional office", "a neighboring city", "a metro branch", "a local site"],
+    "JOB_TITLE": ["a professional role", "an individual contributor role", "a team-lead role"],
+    "DATE": ["earlier this year", "mid-quarter", "a recent business day"],
+    "ORG": ["a partner organization", "an internal team", "a client account"],
+    "AGE": ["20-29 years old", "30-39 years old", "40-49 years old"],
+    "FINANCIAL_AMOUNT": ["a low financial range", "a mid financial range", "a high financial range"],
+}
+
+def candidate_values(entity_text: str, entity_type: str) -> list[str]:
+    del entity_text
+    return list(_CANDIDATES.get(entity_type.upper(), []))
+
+def semantic_utility(original: str, candidate: str) -> float:
+    left, right = set(original.lower().split()), set(candidate.lower().split())
+    overlap = len(left & right) / max(len(left), 1)
+    length = 1 - min(abs(len(original)-len(candidate))/max(len(original),1), 1)
+    return .7 * overlap + .3 * length
+
+def exponential_sanitize(entity_text: str, entity_type: str, epsilon: float = 1.0, sensitivity: float = 1.0, candidates=None) -> str:
+    choices = list(candidates if candidates is not None else candidate_values(entity_text, entity_type))
+    if not choices:
+        return generalize(entity_text, entity_type)
+    return ExponentialMechanism(ExponentialMechanismConfig(epsilon, sensitivity)).select(entity_text, choices, semantic_utility)
 
 
 # ---------------------------------------------------------------------------

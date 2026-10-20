@@ -63,3 +63,10 @@ for each entity, `MechanismRouter.route()` → for TOKENIZE entities,
 then also log the pair in the vault → assemble the sanitized prompt →
 `utility_assessor.query_with_gate()` → `SessionVault.restore_all()` on
 the response.
+## DP 2.0 implementation
+
+The refreshed branch includes per-entity risk assessment, critical-data
+policy, HMAC/AES-GCM vault protection, the Exponential Mechanism, semantic
+generalization, epsilon accounting, leakage checks, cloud/local routing,
+response filtering, and offline adversarial evaluation. See
+`ARCHITECTURE_DP2.md` and `IMPLEMENTATION_REPORT.md` for the flow and limits.

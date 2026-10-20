@@ -23,12 +23,14 @@ Design choices grounded in the literature review:
 
 from __future__ import annotations
 
-import random
+import base64
+import hashlib
+import hmac
 import secrets
 from dataclasses import dataclass, field
 from typing import Optional
 
-from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +70,12 @@ class SessionVault:
     unencrypted; call destroy() at session end to drop the key and
     wipe the in-memory store."""
 
-    _fernet: Fernet = field(default_factory=lambda: Fernet(Fernet.generate_key()))
+    _key: bytes = field(default_factory=lambda: AESGCM.generate_key(bit_length=256))
     _encrypted_store: dict[str, bytes] = field(default_factory=dict)
     _used_surrogates: dict[str, set] = field(default_factory=dict)  # per entity_text
     _token_counters: dict[str, int] = field(default_factory=dict)
+    require_authorization: bool = False
+    _authorized: bool = field(default=False, init=False, repr=False)
 
     def _choose_surrogate(
         self,
@@ -81,32 +85,10 @@ class SessionVault:
 
         pool = _pool_for(entity_type)
 
-        # If this entity type does not have a meaningful
-        # surrogate pool, generate a unique placeholder.
-        if pool == _SURROGATE_POOLS["DEFAULT"]:
-
-            entity_type = entity_type.upper()
-
-            count = self._token_counters.get(entity_type, 0) + 1
-
-            self._token_counters[entity_type] = count
-
-            return f"[{entity_type}_{count}]"
-
-        # Use one-to-many semantic surrogate pools
-        used = self._used_surrogates.setdefault(entity_text, set())
-
-        available = [
-        surrogate
-        for surrogate in pool
-        if surrogate not in used
-        ] or pool
-
-        choice = random.choice(available)
-
-        used.add(choice)
-
-        return choice
+        del pool
+        digest = hmac.new(self._key, entity_text.encode(), hashlib.sha256).digest()
+        encoded = base64.b32encode(digest[:10]).decode().rstrip("=")
+        return f"[{entity_type.upper()}_{encoded}]"
 
     def protect(self, entity_text: str, entity_type: str, mechanism: str) -> str:
         """Register a protected span and return the surrogate/placeholder
@@ -150,10 +132,12 @@ class SessionVault:
         in the LLM's response. Returns None if not found (e.g. the
         model paraphrased the placeholder itself -- log this as a
         restoration miss during evaluation)."""
+        if self.require_authorization and not self._authorized:
+            raise PermissionError("vault restoration is not authorized")
         entry = self._load(surrogate)
         return entry.original if entry else None
 
-    def restore_all(self, response_text: str) -> str:
+    def restore_all(self, response_text: str, authorization: Optional[str] = None) -> str:
         """
         Replace every known surrogate or placeholder in a response
         with its original value.
@@ -162,6 +146,8 @@ class SessionVault:
         both semantic surrogates and generated structured placeholders.
         """
 
+        if authorization is not None:
+            self.authorize_restoration(authorization)
         restored = response_text
 
         # Sort longest first to avoid partial replacement problems.
@@ -186,21 +172,34 @@ class SessionVault:
         self._encrypted_store.clear()
         self._used_surrogates.clear()
         self._token_counters.clear()
-        self._fernet = Fernet(Fernet.generate_key())  # orphan the old key
+        self._key = AESGCM.generate_key(bit_length=256)
+        self._authorized = False
+
+    def authorize_restoration(self, authorization: str) -> None:
+        if not isinstance(authorization, str) or not authorization.strip():
+            raise PermissionError("invalid restoration authorization")
+        self._authorized = True
 
     # -- internal encrypted storage -----------------------------------
 
     def _store(self, surrogate: str, entry: VaultEntry) -> None:
         import json
-        payload = json.dumps(entry.__dict__).encode("utf-8")
-        self._encrypted_store[surrogate] = self._fernet.encrypt(payload)
+        payload = json.dumps(entry.__dict__, separators=(",", ":")).encode("utf-8")
+        nonce = secrets.token_bytes(12)
+        self._encrypted_store[surrogate] = nonce + AESGCM(self._key).encrypt(nonce, payload, surrogate.encode())
 
     def _load(self, surrogate: str) -> Optional[VaultEntry]:
         import json
         blob = self._encrypted_store.get(surrogate)
         if blob is None:
             return None
-        payload = json.loads(self._fernet.decrypt(blob).decode("utf-8"))
+        if len(blob) < 13:
+            raise ValueError("invalid vault ciphertext")
+        nonce, ciphertext = blob[:12], blob[12:]
+        try:
+            payload = json.loads(AESGCM(self._key).decrypt(nonce, ciphertext, surrogate.encode()).decode("utf-8"))
+        except Exception as exc:
+            raise ValueError("invalid vault ciphertext") from exc
         return VaultEntry(**payload)
 
     def _used_surrogates_flat(self):

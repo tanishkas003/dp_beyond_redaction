@@ -72,6 +72,18 @@ def leakage_prevention_rate(ground_truth_spans: list[str], sanitized_text: str) 
     prevented = sum(1 for span in ground_truth_spans if span not in sanitized_text)
     return prevented / len(ground_truth_spans)
 
+def entity_exposure_rate(ground_truth_spans: list[str], sanitized_text: str) -> float:
+    if not ground_truth_spans:
+        return 0.0
+    return sum(span in sanitized_text for span in ground_truth_spans) / len(ground_truth_spans)
+
+def privacy_recall(ground_truth_spans: list[str], sanitized_text: str) -> float:
+    return leakage_prevention_rate(ground_truth_spans, sanitized_text)
+
+def information_retained(original: str, sanitized: str) -> float:
+    source = set(original.lower().split())
+    return 1.0 if not source else len(source & set(sanitized.lower().split())) / len(source)
+
 
 def reversibility_accuracy(expected_values: Sequence[str], restored_text: str) -> float:
     """Fraction of values that survive a protect -> LLM -> restore round trip.
